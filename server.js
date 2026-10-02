@@ -30,7 +30,7 @@ app.post('/render', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters.' });
   }
 
-  res.json({ status: 'Far-Left Watermark Engine Processing' });
+  res.json({ status: 'Refined Typography Engine Processing' });
 
   const tmpDir = path.join('/tmp', `render-${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -96,7 +96,10 @@ app.post('/render', async (req, res) => {
     const sanitizedHook = (hookText || 'MUST WATCH!').replace(/'/g, "");
     const sanitizedAEOTitle = aeoSearchTitle.replace(/'/g, "");
 
-    // Filter Graph: Zero Spacing Far-Left Bottom Logo Placement (x=0:y=main_h-overlay_h)
+    // Refined Typography:
+    // 1. Hook Text: Yellow, font size 65, bounded width (800px max) with line wrapping
+    // 2. AEO Banner: Compact white text box, font size 52, active strictly between 2.5s and 8.5s
+    // 3. Watermark: Pinned flush to far bottom-left edge (x=0:y=main_h-overlay_h)
     let filterComplex = 
       `[0:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=contrast=1.06:brightness=0.02:saturation=1.1,hqdn3d=1:1:3:3[v_clean]; ` +
       `[v_clean]split=3[v_cam1][v_cam2][v_cam3]; ` +
@@ -104,12 +107,12 @@ app.post('/render', async (req, res) => {
       `[v_cam2]trim=${cameraCuts[1].start}:${cameraCuts[1].end},setpts=PTS-STARTPTS[v_cut2]; ` +
       `[v_cam3]trim=${cameraCuts[2].start}:${cameraCuts[2].end},scale=1242:2208,crop=1080:1920:80:80,setpts=PTS-STARTPTS[v_cut3]; ` +
       `[v_cut1][v_cut2][v_cut3]concat=n=3:v=1:a=0[v_switched]; ` +
-      `[v_switched]drawtext=text='${sanitizedHook}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=100:fontcolor=yellow:borderw=6:bordercolor=black:shadowcolor=black@0.6:shadowx=6:shadowy=6:x=(w-text_w)/2:y=(h-text_h)/2-120:enable='between(t,0,2.5)'[v_hook_txt]; ` +
-      `[v_hook_txt]drawtext=text='${sanitizedAEOTitle}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=62:fontcolor=white:box=1:boxcolor=black@0.85:boxborderw=14:x=(w-text_w)/2:y=h-420:enable='between(t,2,9)'[v_banner]; `;
+      `[v_switched]drawtext=text='${sanitizedHook}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=65:fontcolor=yellow:box=1:boxcolor=black@0.75:boxborderw=10:line_spacing=12:x=(w-text_w)/2:y=(h-text_h)/2-180:enable='between(t,0,3)'[v_hook_txt]; ` +
+      `[v_hook_txt]drawtext=text='${sanitizedAEOTitle}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=52:fontcolor=white:box=1:boxcolor=black@0.85:boxborderw=12:x=(w-text_w)/2:y=h-380:enable='between(t,3,8.5)'[v_banner]; `;
 
     if (hasLogo) {
       filterComplex += 
-        `[1:v]scale=220:-1,format=rgba,colorchannelmixer=aa=0.45[logo_trans]; ` +
+        `[1:v]scale=200:-1,format=rgba,colorchannelmixer=aa=0.45[logo_trans]; ` +
         `[v_banner][logo_trans]overlay=x=0:y=main_h-overlay_h:format=auto[v_out]; `;
     } else {
       filterComplex += `[v_banner]null[v_out]; `;
@@ -121,7 +124,7 @@ app.post('/render', async (req, res) => {
 
     const ffmpegCmd = `ffmpeg -y -i "${rawPath}" ${logoInputFlag} -filter_complex "${filterComplex}" -map "[v_out]" -map "[a_out]" -c:v libx264 -preset veryfast -r 30 -g 60 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 128k -ar 44100 "${outPath}"`;
 
-    console.log('⚡ Executing Far-Left Watermark FFmpeg Render...');
+    console.log('⚡ Executing Refined Typography FFmpeg Render...');
     await execPromise(ffmpegCmd);
 
     console.log(`📤 Saving render to R2 as ${editedVideoKey}...`);
@@ -142,7 +145,7 @@ app.post('/render', async (req, res) => {
 
       const clientMsg = 
         `🎬 *Your Pro Video Edit is Ready!*\n\n` +
-        `Hi *${name}*, your watermark has been locked to the far-left bottom edge.\n\n` +
+        `Hi *${name}*, your video has been updated with centered yellow typography and far-left logo placement.\n\n` +
         `🎟️ *Token Key:* \`${userToken || 'PRO-MEMBER'}\`\n` +
         `📥 *Download Final Video:*\n[Download Video](${editedVideoUrl})`;
 
