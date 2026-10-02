@@ -11,7 +11,9 @@ const execPromise = promisify(exec);
 const app = express();
 app.use(express.json());
 
-// Cloudflare R2 Storage Client Configuration
+const TELEGRAM_BOT_TOKEN = '8879803368:AAF2RuCUfrX4TPovetHMYAMxgZUn0G9uErU';
+
+// Cloudflare R2 Client Configuration
 const s3 = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -22,14 +24,14 @@ const s3 = new S3Client({
 });
 
 app.post('/render', async (req, res) => {
-  const { rawVideoKey, logoKey, editedVideoKey, hookText } = req.body;
+  const { rawVideoKey, logoKey, editedVideoKey, hookText, clientName, clientTelegramId, domainHost } = req.body;
 
   if (!rawVideoKey || !editedVideoKey) {
     return res.status(400).json({ error: 'Missing required parameters.' });
   }
 
-  // Acknowledge request immediately so Cloudflare Worker doesn't timeout
-  res.json({ status: 'AI Senior Director Engine Triggered' });
+  // Acknowledge request immediately to prevent Worker timeouts
+  res.json({ status: 'AI Senior Director Engine Processing' });
 
   const tmpDir = path.join('/tmp', `render-${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -54,7 +56,7 @@ app.post('/render', async (req, res) => {
       }
     }
 
-    // Default Edit Decision List (EDL) if AI is unavailable or unconfigured
+    // Default Edit Decision List (EDL)
     let editPlan = {
       punchInStart: 3,
       punchInEnd: 8,
@@ -65,7 +67,7 @@ app.post('/render', async (req, res) => {
       slowMoDuration: 2
     };
 
-    // Gemini 2.5 Flash Multimodal Topic Analysis & Structural Editing
+    // Gemini 2.5 Flash Multimodal Topic Analysis
     if (process.env.GEMINI_API_KEY) {
       try {
         console.log('🤖 Gemini Flash analyzing video topic and pacing...');
@@ -112,7 +114,7 @@ app.post('/render', async (req, res) => {
       filterComplex += `[v_banner]null[v_out]; `;
     }
 
-    // Studio Sound Equalization & Voice Boost (80Hz Highpass + Vocal Frequency Enhancement)
+    // Studio Audio Equalization & Voice Boost
     filterComplex += `[0:a]afade=t=in:st=0:d=0.2,afade=t=out:st=29.5:d=0.5,highpass=f=80,equalizer=f=3200:width_type=h:width=1000:g=4[a_out]`;
 
     const logoInputFlag = hasLogo ? `-i "${logoPath}"` : '';
@@ -121,7 +123,7 @@ app.post('/render', async (req, res) => {
     console.log('⚡ Executing dynamic FFmpeg video transformation...');
     await execPromise(ffmpegCmd);
 
-    console.log(`📤 Saving finished video to R2 as ${editedVideoKey}...`);
+    console.log(`📤 Uploading finished video to R2 as ${editedVideoKey}...`);
     const fileStream = fs.createReadStream(outPath);
     await s3.send(new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME,
@@ -130,7 +132,26 @@ app.post('/render', async (req, res) => {
       ContentType: 'video/mp4',
     }));
 
-    console.log('✅ Video rendering completed successfully!');
+    console.log('✅ Video successfully saved to R2! Sending Telegram notification...');
+
+    // Send Telegram alert ONLY AFTER file is saved in R2
+    if (clientTelegramId) {
+      const host = domainHost || 'uploads.justdoit.co.ke';
+      const editedVideoUrl = `https://${host}/${editedVideoKey}`;
+      const name = clientName || 'Valued Client';
+
+      const clientMsg = 
+        `🎬 *Your TikTok Video is Ready!*\n\n` +
+        `Hi *${name}*, Gemini Flash AI has finished editing your video.\n\n` +
+        `📥 *Download Final Video:*\n[Download Edited Video](${editedVideoUrl})`;
+
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: clientTelegramId, text: clientMsg, parse_mode: 'Markdown' }),
+      });
+      console.log('📲 Telegram notification delivered successfully!');
+    }
   } catch (err) {
     console.error('❌ Render Error:', err);
   } finally {
