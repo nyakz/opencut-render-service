@@ -11,7 +11,7 @@ const execPromise = promisify(exec);
 const app = express();
 app.use(express.json());
 
-// Cloudflare R2 Client Configuration
+// Cloudflare R2 Storage Client Configuration
 const s3 = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -28,7 +28,7 @@ app.post('/render', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters.' });
   }
 
-  // Acknowledge request instantly so Cloudflare Worker doesn't wait
+  // Acknowledge request immediately so Cloudflare Worker doesn't timeout
   res.json({ status: 'AI Senior Director Engine Triggered' });
 
   const tmpDir = path.join('/tmp', `render-${Date.now()}`);
@@ -50,11 +50,11 @@ app.post('/render', async (req, res) => {
         await pipeline(logoObj.Body, fs.createWriteStream(logoPath));
         hasLogo = true;
       } catch (e) {
-        console.warn('Logo download skipped.');
+        console.warn('Logo download skipped, proceeding without watermark.');
       }
     }
 
-    // Default Edit Decision List if AI is offline
+    // Default Edit Decision List (EDL) if AI is unavailable or unconfigured
     let editPlan = {
       punchInStart: 3,
       punchInEnd: 8,
@@ -65,7 +65,7 @@ app.post('/render', async (req, res) => {
       slowMoDuration: 2
     };
 
-    // Gemini 2.5 Flash Multimodal Topic Analysis & Structural Cutting
+    // Gemini 2.5 Flash Multimodal Topic Analysis & Structural Editing
     if (process.env.GEMINI_API_KEY) {
       try {
         console.log('🤖 Gemini Flash analyzing video topic and pacing...');
@@ -112,7 +112,7 @@ app.post('/render', async (req, res) => {
       filterComplex += `[v_banner]null[v_out]; `;
     }
 
-    // Studio Sound Equalization & Voice Boost
+    // Studio Sound Equalization & Voice Boost (80Hz Highpass + Vocal Frequency Enhancement)
     filterComplex += `[0:a]afade=t=in:st=0:d=0.2,afade=t=out:st=29.5:d=0.5,highpass=f=80,equalizer=f=3200:width_type=h:width=1000:g=4[a_out]`;
 
     const logoInputFlag = hasLogo ? `-i "${logoPath}"` : '';
