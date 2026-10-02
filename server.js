@@ -11,6 +11,7 @@ const execPromise = promisify(exec);
 const app = express();
 app.use(express.json());
 
+// Cloudflare R2 Client Configuration
 const s3 = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -27,7 +28,8 @@ app.post('/render', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters.' });
   }
 
-  res.json({ status: 'AI Senior Editor Engine Initialized' });
+  // Acknowledge request instantly so Cloudflare Worker doesn't wait
+  res.json({ status: 'AI Senior Director Engine Triggered' });
 
   const tmpDir = path.join('/tmp', `render-${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -52,7 +54,7 @@ app.post('/render', async (req, res) => {
       }
     }
 
-    // Default Edit Decisions if AI is unavailable
+    // Default Edit Decision List if AI is offline
     let editPlan = {
       punchInStart: 3,
       punchInEnd: 8,
@@ -63,10 +65,10 @@ app.post('/render', async (req, res) => {
       slowMoDuration: 2
     };
 
-    // Human-Like Dynamic Analysis via Gemini 2.5 Flash
+    // Gemini 2.5 Flash Multimodal Topic Analysis & Structural Cutting
     if (process.env.GEMINI_API_KEY) {
       try {
-        console.log('🤖 Gemini 2.5 Flash analyzing clip content and theme...');
+        console.log('🤖 Gemini Flash analyzing video topic and pacing...');
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         
         const systemPrompt = 
@@ -95,15 +97,10 @@ app.post('/render', async (req, res) => {
       }
     }
 
-    // Build Custom Dynamic FFmpeg Pipeline tailored to this exact video
+    // Custom FFmpeg Dynamic Filter Graph
     const sanitizedHook = (hookText || 'MUST WATCH!').replace(/'/g, "");
     const sanitizedBanner = editPlan.keyTopicBanner.replace(/'/g, "");
     
-    // Dynamic Filters:
-    // 1. Base 1080x1920 9:16 safe crop
-    // 2. 0-3s Hook Headline text overlay
-    // 3. Dynamic Punch-In Zoom (Scale 1.2x on emphasis timestamp)
-    // 4. Topic context banner overlay when important audience information is spoken
     let filterComplex = 
       `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30[v_base]; ` +
       `[v_base]drawtext=text='${sanitizedHook}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=100:fontcolor=yellow:borderw=5:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/3:enable='between(t,0,3)'[v_hook]; ` +
@@ -115,16 +112,16 @@ app.post('/render', async (req, res) => {
       filterComplex += `[v_banner]null[v_out]; `;
     }
 
-    // Professional Studio Sound Design: Highpass filter + Voice presence EQ + Room noise reduction
+    // Studio Sound Equalization & Voice Boost
     filterComplex += `[0:a]afade=t=in:st=0:d=0.2,afade=t=out:st=29.5:d=0.5,highpass=f=80,equalizer=f=3200:width_type=h:width=1000:g=4[a_out]`;
 
     const logoInputFlag = hasLogo ? `-i "${logoPath}"` : '';
     const ffmpegCmd = `ffmpeg -y -i "${rawPath}" ${logoInputFlag} -filter_complex "${filterComplex}" -map "[v_out]" -map "[a_out]" -c:v libx264 -preset ultrafast -tune zerolatency -crf 26 -c:a aac -b:a 128k "${outPath}"`;
 
-    console.log('⚡ Executing dynamic FFmpeg edit graph...');
+    console.log('⚡ Executing dynamic FFmpeg video transformation...');
     await execPromise(ffmpegCmd);
 
-    console.log(`📤 Saving finished custom edit to R2 as ${editedVideoKey}...`);
+    console.log(`📤 Saving finished video to R2 as ${editedVideoKey}...`);
     const fileStream = fs.createReadStream(outPath);
     await s3.send(new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME,
@@ -133,7 +130,7 @@ app.post('/render', async (req, res) => {
       ContentType: 'video/mp4',
     }));
 
-    console.log('✅ Custom human-like edit completed successfully!');
+    console.log('✅ Video rendering completed successfully!');
   } catch (err) {
     console.error('❌ Render Error:', err);
   } finally {
@@ -142,4 +139,4 @@ app.post('/render', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`OpenCut AI Editor running on port ${PORT}`));
+app.listen(PORT, () => console.log(`OpenCut AI Render Engine active on port ${PORT}`));
