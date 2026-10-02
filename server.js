@@ -64,8 +64,8 @@ app.post('/render', async (req, res) => {
     filterComplex += `[0:a]afade=t=in:st=0:d=0.2,afade=t=out:st=29.5:d=0.5,highpass=f=80[a_out]`;
 
     const logoInputFlag = hasLogo ? `-i "${logoPath}"` : '';
-    const ffmpegCmd = `ffmpeg -y -i "${rawPath}" ${logoInputFlag} -filter_complex "${filterComplex}" -map "[v_out]" -map "[a_out]" -c:v libx264 -preset fast -crf 22 -c:a aac "${outPath}"`;
-
+// Replace the old ffmpegCmd in server.js with this high-speed version:
+const ffmpegCmd = `ffmpeg -y -ss 00:00:00 -t 00:00:30 -i "${rawPath}" ${logoInputFlag} -filter_complex "${filterComplex}" -map "[v_out]" -map "[a_out]" -c:v libx264 -preset ultrafast -tune zerolatency -crf 28 -c:a aac -b:a 128k "${outPath}"`;
     console.log('⚡ Running FFmpeg Video Engine...');
     await execPromise(ffmpegCmd);
 
