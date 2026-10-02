@@ -1,6 +1,6 @@
 import express from 'express';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { GoogleGenerativeAI } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
