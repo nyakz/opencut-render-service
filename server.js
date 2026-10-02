@@ -13,7 +13,10 @@ app.use(express.json());
 
 const TELEGRAM_BOT_TOKEN = '8879803368:AAF2RuCUfrX4TPovetHMYAMxgZUn0G9uErU';
 
-// Cloudflare R2 Client Configuration
+// Fallback to 'video-bucket' if process.env.R2_BUCKET_NAME is missing
+const BUCKET_NAME = process.env.R2_BUCKET_NAME || 'video-bucket';
+
+// Cloudflare R2 S3 Client Configuration
 const s3 = new S3Client({
   region: 'auto',
   endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -30,7 +33,7 @@ app.post('/render', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters.' });
   }
 
-  // Acknowledge request immediately to prevent Worker timeouts
+  // Acknowledge request immediately to prevent Cloudflare timeouts
   res.json({ status: 'AI Senior Director Engine Processing' });
 
   const tmpDir = path.join('/tmp', `render-${Date.now()}`);
@@ -41,14 +44,14 @@ app.post('/render', async (req, res) => {
   const outPath = path.join(tmpDir, 'out.mp4');
 
   try {
-    console.log(`📥 Downloading ${rawVideoKey} from R2...`);
-    const videoObj = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: rawVideoKey }));
+    console.log(`📥 Downloading ${rawVideoKey} from R2 bucket "${BUCKET_NAME}"...`);
+    const videoObj = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: rawVideoKey }));
     await pipeline(videoObj.Body, fs.createWriteStream(rawPath));
 
     let hasLogo = false;
     if (logoKey && logoKey !== 'None') {
       try {
-        const logoObj = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: logoKey }));
+        const logoObj = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: logoKey }));
         await pipeline(logoObj.Body, fs.createWriteStream(logoPath));
         hasLogo = true;
       } catch (e) {
@@ -123,18 +126,18 @@ app.post('/render', async (req, res) => {
     console.log('⚡ Executing dynamic FFmpeg video transformation...');
     await execPromise(ffmpegCmd);
 
-    console.log(`📤 Uploading finished video to R2 as ${editedVideoKey}...`);
+    console.log(`📤 Uploading finished video to R2 bucket "${BUCKET_NAME}" as ${editedVideoKey}...`);
     const fileStream = fs.createReadStream(outPath);
     await s3.send(new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME,
+      Bucket: BUCKET_NAME,
       Key: editedVideoKey,
       Body: fileStream,
       ContentType: 'video/mp4',
     }));
 
-    console.log('✅ Video successfully saved to R2! Sending Telegram notification...');
+    console.log('✅ Video successfully saved to R2! Delivering Telegram notification...');
 
-    // Send Telegram alert ONLY AFTER file is saved in R2
+    // Send Telegram alert ONLY AFTER file is verified saved in R2
     if (clientTelegramId) {
       const host = domainHost || 'uploads.justdoit.co.ke';
       const editedVideoUrl = `https://${host}/${editedVideoKey}`;
