@@ -24,13 +24,13 @@ const s3 = new S3Client({
 });
 
 app.post('/render', async (req, res) => {
-  const { rawVideoKey, logoKey, editedVideoKey, hookText, clientName, clientTelegramId, domainHost, userToken, remainingTokens } = req.body;
+  const { rawVideoKey, logoKey, editedVideoKey, hookText, clientName, clientTelegramId, domainHost } = req.body;
 
   if (!rawVideoKey || !editedVideoKey) {
     return res.status(400).json({ error: 'Missing required parameters.' });
   }
 
-  res.json({ status: 'Refined Typography Engine Processing' });
+  res.json({ status: 'Processing Low-Memory Render Job' });
 
   const tmpDir = path.join('/tmp', `render-${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -55,79 +55,53 @@ app.post('/render', async (req, res) => {
       }
     }
 
-    let cameraCuts = [
-      { start: 0, end: 2.5, angle: 'close_up' },
-      { start: 2.5, end: 6.0, angle: 'wide' },
-      { start: 6.0, end: 10.0, angle: 'side_left' }
-    ];
-    let aeoSearchTitle = (hookText || 'PREMIUM EXCLUSIVE EDIT').toUpperCase();
+    let aeoSearchTitle = (hookText || 'MUST WATCH EDIT').toUpperCase();
 
-    // Gemini 2.5 Pro Director Analysis
     if (process.env.GEMINI_API_KEY) {
       try {
-        console.log('🤖 Gemini 2.5 Pro analyzing video cuts...');
+        console.log('🤖 AI Analyzing topic...');
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        
-        const systemPrompt = 
-          `You are an elite short-form video editor. Analyze this video topic. ` +
-          `Output JSON ONLY with an AEO keyword search title and smooth camera cut timestamps: ` +
-          `{` +
-          `  "aeoSearchTitle": "3-4 WORD HIGH-INTENT SEARCH TITLE",` +
-          `  "cuts": [` +
-          `    {"start": 0, "end": 2.5, "angle": "close_up"},` +
-          `    {"start": 2.5, "end": 6.0, "angle": "wide"},` +
-          `    {"start": 6.0, "end": 10.0, "angle": "side_left"}` +
-          `  ]` +
-          `}`;
-
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-pro',
-          contents: systemPrompt,
+          model: 'gemini-2.5-flash',
+          contents: `Analyze video topic for text overlay. Output JSON ONLY: {"aeoSearchTitle": "3-4 WORD SUMMARY"}`,
         });
-
         const parsed = JSON.parse(response.text.match(/\{[\s\S]*\}/)[0]);
-        if (parsed.cuts) cameraCuts = parsed.cuts;
         if (parsed.aeoSearchTitle) aeoSearchTitle = parsed.aeoSearchTitle;
       } catch (err) {
-        console.warn('AI Analysis fallback engaged:', err.message);
+        console.warn('AI fallback engaged:', err.message);
       }
     }
 
     const sanitizedHook = (hookText || 'MUST WATCH!').replace(/'/g, "");
     const sanitizedAEOTitle = aeoSearchTitle.replace(/'/g, "");
 
-    // Refined Typography:
-    // 1. Hook Text: Yellow, font size 65, bounded width (800px max) with line wrapping
-    // 2. AEO Banner: Compact white text box, font size 52, active strictly between 2.5s and 8.5s
-    // 3. Watermark: Pinned flush to far bottom-left edge (x=0:y=main_h-overlay_h)
+    // LOW-MEMORY SINGLE-PASS FILTER GRAPH
+    // Avoids memory-heavy concatenations and multi-scale split buffers
     let filterComplex = 
-      `[0:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=contrast=1.06:brightness=0.02:saturation=1.1,hqdn3d=1:1:3:3[v_clean]; ` +
-      `[v_clean]split=3[v_cam1][v_cam2][v_cam3]; ` +
-      `[v_cam1]trim=${cameraCuts[0].start}:${cameraCuts[0].end},scale=1296:2304,crop=1080:1920,setpts=PTS-STARTPTS[v_cut1]; ` +
-      `[v_cam2]trim=${cameraCuts[1].start}:${cameraCuts[1].end},setpts=PTS-STARTPTS[v_cut2]; ` +
-      `[v_cam3]trim=${cameraCuts[2].start}:${cameraCuts[2].end},scale=1242:2208,crop=1080:1920:80:80,setpts=PTS-STARTPTS[v_cut3]; ` +
-      `[v_cut1][v_cut2][v_cut3]concat=n=3:v=1:a=0[v_switched]; ` +
-      `[v_switched]drawtext=text='${sanitizedHook}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=65:fontcolor=yellow:box=1:boxcolor=black@0.75:boxborderw=10:line_spacing=12:x=(w-text_w)/2:y=(h-text_h)/2-180:enable='between(t,0,3)'[v_hook_txt]; ` +
-      `[v_hook_txt]drawtext=text='${sanitizedAEOTitle}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=52:fontcolor=white:box=1:boxcolor=black@0.85:boxborderw=12:x=(w-text_w)/2:y=h-380:enable='between(t,3,8.5)'[v_banner]; `;
+      `[0:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[v_base]; ` +
+      `[v_base]drawtext=text='${sanitizedHook}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=60:fontcolor=yellow:box=1:boxcolor=black@0.75:boxborderw=10:x=(w-text_w)/2:y=(h-text_h)/2-180:enable='between(t,0,3)'[v_hook_txt]; ` +
+      `[v_hook_txt]drawtext=text='${sanitizedAEOTitle}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=50:fontcolor=white:box=1:boxcolor=black@0.85:boxborderw=12:x=(w-text_w)/2:y=h-380:enable='between(t,3,8.5)'[v_banner]; `;
 
+    // Far-Left Bottom Logo Placement (x=0, y=bottom)
     if (hasLogo) {
       filterComplex += 
-        `[1:v]scale=200:-1,format=rgba,colorchannelmixer=aa=0.45[logo_trans]; ` +
+        `[1:v]scale=180:-1,format=rgba,colorchannelmixer=aa=0.45[logo_trans]; ` +
         `[v_banner][logo_trans]overlay=x=0:y=main_h-overlay_h:format=auto[v_out]; `;
     } else {
       filterComplex += `[v_banner]null[v_out]; `;
     }
 
-    filterComplex += `[0:a]afade=t=in:st=0:d=0.15,afade=t=out:st=29.5:d=0.5,highpass=f=80,equalizer=f=3200:width_type=h:width=1000:g=3.5,aresample=44100[a_out]`;
+    filterComplex += `[0:a]afade=t=in:st=0:d=0.15,afade=t=out:st=29.5:d=0.5,highpass=f=80,equalizer=f=3200:width_type=h:width=1000:g=3.5[a_out]`;
 
     const logoInputFlag = hasLogo ? `-i "${logoPath}"` : '';
+    
+    // Limits RAM usage via single-threaded ultrafast preset (-threads 1)
+    const ffmpegCmd = `ffmpeg -y -threads 1 -i "${rawPath}" ${logoInputFlag} -filter_complex "${filterComplex}" -map "[v_out]" -map "[a_out]" -c:v libx264 -preset ultrafast -r 30 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 128k "${outPath}"`;
 
-    const ffmpegCmd = `ffmpeg -y -i "${rawPath}" ${logoInputFlag} -filter_complex "${filterComplex}" -map "[v_out]" -map "[a_out]" -c:v libx264 -preset veryfast -r 30 -g 60 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 128k -ar 44100 "${outPath}"`;
-
-    console.log('⚡ Executing Refined Typography FFmpeg Render...');
+    console.log('⚡ Executing Low-Memory FFmpeg Render...');
     await execPromise(ffmpegCmd);
 
-    console.log(`📤 Saving render to R2 as ${editedVideoKey}...`);
+    console.log(`📤 Uploading finished file to R2 as ${editedVideoKey}...`);
     const fileStream = fs.createReadStream(outPath);
     await s3.send(new PutObjectCommand({
       Bucket: BUCKET_NAME,
@@ -136,7 +110,7 @@ app.post('/render', async (req, res) => {
       ContentType: 'video/mp4',
     }));
 
-    console.log('✅ Render completed! Sending Telegram alert...');
+    console.log('✅ Video successfully saved to R2! Delivering Telegram notification...');
 
     if (clientTelegramId) {
       const host = domainHost || 'uploads.justdoit.co.ke';
@@ -144,24 +118,25 @@ app.post('/render', async (req, res) => {
       const name = clientName || 'Valued Client';
 
       const clientMsg = 
-        `🎬 *Your Pro Video Edit is Ready!*\n\n` +
-        `Hi *${name}*, your video has been updated with centered yellow typography and far-left logo placement.\n\n` +
-        `🎟️ *Token Key:* \`${userToken || 'PRO-MEMBER'}\`\n` +
-        `📥 *Download Final Video:*\n[Download Video](${editedVideoUrl})`;
+        `🎬 *Your TikTok Video is Ready!*\n\n` +
+        `Hi *${name}*, your edit has finished rendering.\n\n` +
+        `📥 *Download Video:*\n[Download Final Video](${editedVideoUrl})`;
 
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      const tgRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: clientTelegramId, text: clientMsg, parse_mode: 'Markdown' }),
       });
-      console.log('📲 Telegram notification delivered!');
+      
+      const tgJson = await tgRes.json();
+      console.log('📲 Telegram API Response:', tgJson);
     }
   } catch (err) {
-    console.error('❌ Render Error:', err);
+    console.error('❌ Render Failure:', err.stack || err.message);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`OpenCut AI Render Engine active on port ${PORT}`));
+app.listen(PORT, () => console.log(`OpenCut Engine online on port ${PORT}`));
