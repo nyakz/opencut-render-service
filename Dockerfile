@@ -1,5 +1,6 @@
-FROM node:20-slim
+FROM node:22-slim
 
+# Install system FFmpeg and required font rendering libraries
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     fonts-liberation \
